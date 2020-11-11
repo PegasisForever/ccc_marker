@@ -11,6 +11,7 @@ import java.io.InputStreamReader
 import java.util.concurrent.Callable
 import java.util.concurrent.TimeUnit
 
+val isWindows = "win" in System.getProperty("os.name").toLowerCase()
 var cleanUp: () -> Unit = {}
 var lineFinished = true
 fun main(args: Array<String>) {
@@ -54,7 +55,7 @@ class CCCMarker : Callable<Unit> {
     )
     private var timeout: Int = 2000
 
-    fun _call() {
+    private fun _call() {
         val runCodeWrapped: (inFile: File) -> RunCodeResult
 
         if (program.endsWith(".java") && " " !in program) {
@@ -85,7 +86,7 @@ class CCCMarker : Callable<Unit> {
         } else if (program.endsWith(".py") && " " !in program) {
             val absPath = File(program).absolutePath
             runCodeWrapped = { inFile ->
-                runCode("python", absPath, inFile = inFile)
+                runCode("python3", absPath, inFile = inFile)
             }
         } else {
             val programTokens = Tokenizer.tokenize(program)
@@ -312,5 +313,9 @@ fun printError(message: Any?) {
         println()
         lineFinished = true
     }
-    System.err.println("\u001B[31m$message\u001B[0m")
+    if (isWindows) {
+        System.err.println(message)
+    } else {
+        System.err.println("\u001B[31m$message\u001B[0m")
+    }
 }
