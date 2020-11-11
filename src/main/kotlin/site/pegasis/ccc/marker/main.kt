@@ -60,17 +60,22 @@ class CCCMarker : Callable<Unit> {
         if (program.endsWith(".java") && " " !in program) {
             printDivider("Compiling")
             val sourceFile = File(program).absoluteFile
-            assert(sourceFile.isFile)
+            expect(sourceFile.isFile, "\"$program\" is not a file or doesn't exist.")
 
             println("Compiling $program.....")
             val tempDir = File(".ccc_marker_temp_${System.currentTimeMillis()}").absoluteFile
             tempDir.mkdir()
-            val packageName = javaPackageName(sourceFile)
 
             runCommand("javac", "-d", tempDir.absolutePath, sourceFile.absolutePath, assertSuccess = true)
 
-            val fullClassName =
-                "$packageName.${program.substring(program.lastIndexOf('/') + 1, program.lastIndexOf('.'))}"
+            val packageName = javaPackageName(sourceFile)
+            val className = program.substring(program.lastIndexOf('/') + 1, program.lastIndexOf('.'))
+            val fullClassName = if (packageName != null) {
+                "$packageName.$className"
+            } else {
+                className
+            }
+
             runCodeWrapped = { inFile ->
                 runCode("java", fullClassName, inFile = inFile, workingDirectory = tempDir)
             }
@@ -85,15 +90,16 @@ class CCCMarker : Callable<Unit> {
         }
 
         printDivider("Testing")
-        assert(testDataDirectory.isDirectory)
+        expect(testDataDirectory.isDirectory, "\"${testDataDirectory.path}\" is not a directory or doesn't exist.")
 
         val testCases = testDataDirectory.listFiles()!!.filter { file ->
             file.isFile && file.name.endsWith(".in")
         }.map { file ->
             TestCase(file, File(file.path.substring(0, file.path.length - 3) + ".out"))
         }.sorted()
-        val times = arrayListOf<Int>()
+        expect(testCases.isNotEmpty(), "\"${testDataDirectory.path}\" doesn't contain any test cases.")
 
+        val times = arrayListOf<Int>()
         for (i in testCases.indices) {
             val testCase = testCases[i]
             print("[${i + 1}/${testCases.size}] Running test case ${testCase.name}.....  ")
@@ -145,13 +151,17 @@ class CCCMarker : Callable<Unit> {
         }
     }
 
-    private fun javaPackageName(sourceFile: File): String {
+    private fun javaPackageName(sourceFile: File): String? {
         val source = sourceFile.readText()
-        val firstSemi = source.indexOf(";")
-        assert(firstSemi >= 0)
-        val packageName = source.substring(7, firstSemi).trim()
-        println("Package name is $packageName.")
-        return packageName
+        if (source.indexOf("package") == 0) {
+            val firstSemi = source.indexOf(";")
+            val packageName = source.substring(7, firstSemi).trim()
+            println("Package name is $packageName.")
+            return packageName
+        } else {
+            println("Package name is empty.")
+            return null
+        }
     }
 
     private fun runCommand(vararg args: String, print: Boolean = true, assertSuccess: Boolean = false): Int {
@@ -163,8 +173,8 @@ class CCCMarker : Callable<Unit> {
         val status = process.waitFor()
         if (stdout.isNotBlank() && print) println(stdout)
         if (stderr.isNotBlank()) printError(stderr)
-        if (print) println("       Process finished with exit code $status")
-        if (assertSuccess) assert(status == 0)
+        if (print) println("       Process finished with exit code $status.")
+        if (assertSuccess) expect(status == 0, "Process finished with exit code $status.")
         return status
     }
 
@@ -260,4 +270,10 @@ fun String.toLF(): String {
     return replace("\r\n", "\n")
         .replace('\r', '\n')
         .trim()
+}
+
+fun expect(assertion: Boolean, message: Any) {
+    if (!assertion) {
+        error(message)
+    }
 }
