@@ -96,7 +96,7 @@ class CCCMarker : Callable<Unit> {
         } else if (program.endsWith(".py") && " " !in program) {
             val absPath = File(program).absolutePath
             runCodeWrapped = { inFile ->
-                runCode("python3", absPath, inFile = inFile)
+                runCode(if (isWindows) "python" else "python3", absPath, inFile = inFile)
             }
         } else {
             val programTokens = Tokenizer.tokenize(program)
