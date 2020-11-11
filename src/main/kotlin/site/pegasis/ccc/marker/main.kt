@@ -55,9 +55,7 @@ class CCCMarker : Callable<Unit> {
     private var timeout: Int = 2000
 
     fun _call() {
-        var runCodeWrapped: (inFile: File) -> RunCodeResult = {
-            throw NotImplementedError()
-        }
+        val runCodeWrapped: (inFile: File) -> RunCodeResult
 
         if (program.endsWith(".java") && " " !in program) {
             printDivider("Compiling")
@@ -88,6 +86,11 @@ class CCCMarker : Callable<Unit> {
             val absPath = File(program).absolutePath
             runCodeWrapped = { inFile ->
                 runCode("python", absPath, inFile = inFile)
+            }
+        } else {
+            val programTokens = Tokenizer.tokenize(program)
+            runCodeWrapped = { inFile ->
+                runCode(*programTokens, inFile = inFile)
             }
         }
 
