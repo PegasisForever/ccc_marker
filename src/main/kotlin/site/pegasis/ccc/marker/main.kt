@@ -12,6 +12,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.TimeUnit
 
 var cleanUp: () -> Unit = {}
+var lineFinished = true
 fun main(args: Array<String>) {
     CommandLine(CCCMarker()).execute(*args)
     cleanUp()
@@ -51,8 +52,7 @@ class CCCMarker : Callable<Unit> {
     )
     private var timeout: Int = 2000
 
-
-    override fun call() {
+    fun _call() {
         var runCodeWrapped: (inFile: File) -> RunCodeResult = {
             throw NotImplementedError()
         }
@@ -62,7 +62,7 @@ class CCCMarker : Callable<Unit> {
             val sourceFile = File(program).absoluteFile
             expect(sourceFile.isFile, "\"$program\" is not a file or doesn't exist.")
 
-            println("Compiling $program.....")
+            printlnStd("Compiling $program.....")
             val tempDir = File(".ccc_marker_temp_${System.currentTimeMillis()}").absoluteFile
             tempDir.mkdir()
 
@@ -102,16 +102,14 @@ class CCCMarker : Callable<Unit> {
         val times = arrayListOf<Int>()
         for (i in testCases.indices) {
             val testCase = testCases[i]
-            print("[${i + 1}/${testCases.size}] Running test case ${testCase.name}.....  ")
+            printStd("[${i + 1}/${testCases.size}] Running test case ${testCase.name}.....  ")
             when (val result = runCodeWrapped(testCase.inFile)) {
                 is RunCodeTimeout -> {
-                    println()
                     printError("Time limit exceeded (${timeout}ms)")
                     writeErrorFiles(testCase)
                     return
                 }
                 is RunCodeRuntimeError -> {
-                    println()
                     printError("Runtime error:")
                     printError(result.stderr)
                     writeErrorFiles(testCase)
@@ -119,10 +117,10 @@ class CCCMarker : Callable<Unit> {
                 }
                 is RunCodeFinished -> {
                     if (verifyResult(testCase, result.stdout)) {
+                        lineFinished = true
                         println("${result.time}ms")
                         times.add(result.time)
                     } else {
-                        println()
                         printError("Wrong answer")
                         writeErrorFiles(testCase, result.stdout)
                         return
@@ -132,9 +130,17 @@ class CCCMarker : Callable<Unit> {
         }
 
         printDivider("Accepted")
-        println("Average: ${times.average().toInt()}ms")
-        println("Min: ${times.minOrNull()}ms")
-        println("Max: ${times.maxOrNull()}ms")
+        printlnStd("Average: ${times.average().toInt()}ms")
+        printlnStd("Min: ${times.minOrNull()}ms")
+        printlnStd("Max: ${times.maxOrNull()}ms")
+    }
+
+    override fun call() {
+        try {
+            _call()
+        } catch (e: Throwable) {
+            printError(e.stackTraceToString())
+        }
     }
 
     private fun verifyResult(testCase: TestCase, output: String): Boolean {
@@ -216,15 +222,15 @@ class CCCMarker : Callable<Unit> {
     }
 
     private fun printDivider(text: String) {
+        if (!lineFinished) {
+            println()
+            lineFinished = true
+        }
         println()
         print("====")
         print(" $text ")
         println("=".repeat(94 - text.length))
         println()
-    }
-
-    private fun printError(message: Any?) {
-        System.err.println("\u001B[31m$message\u001B[0m")
     }
 
     private fun writeErrorFiles(testCase: TestCase, output: String? = null) {
@@ -276,4 +282,25 @@ fun expect(assertion: Boolean, message: Any) {
     if (!assertion) {
         error(message)
     }
+}
+
+fun printStd(message: Any?) {
+    lineFinished = false
+    print(message)
+}
+
+fun printlnStd(message: Any?) {
+    if (!lineFinished) {
+        println()
+        lineFinished = true
+    }
+    println(message)
+}
+
+fun printError(message: Any?) {
+    if (!lineFinished) {
+        println()
+        lineFinished = true
+    }
+    System.err.println("\u001B[31m$message\u001B[0m")
 }
