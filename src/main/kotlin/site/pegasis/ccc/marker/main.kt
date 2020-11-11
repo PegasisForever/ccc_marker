@@ -40,9 +40,11 @@ class CCCMarker : Callable<Unit> {
 
     @Option(
         names = ["-e", "--verify"],
-        description = ["The binary or script used to verify the program output, it will be called as <script> <input> <expectedOutput> <output>, a non-zero exit code indicates the program output is wrong."],
+        description = ["The command used to verify the program output, it will be called as <command> <input> <expectedOutput> <output>, a non-zero exit code indicates the program output is wrong."],
     )
-    private var verifyScript: File? = null
+    private var verifyCommand: String? = null
+
+    private var verifyCommandTokens: Array<String>? = null
 
     @Option(
         names = ["-t", "--timeout"],
@@ -90,8 +92,13 @@ class CCCMarker : Callable<Unit> {
         }
 
         printDivider("Testing")
-        expect(testDataDirectory.isDirectory, "\"${testDataDirectory.path}\" is not a directory or doesn't exist.")
 
+        if (verifyCommand != null) {
+            verifyCommandTokens = Tokenizer.tokenize(verifyCommand!!)
+            printlnStd("Answers will be verified using \"${verifyCommandTokens!!.joinToString(" ")} <input> <expectedOutput> <output>\".")
+        }
+
+        expect(testDataDirectory.isDirectory, "\"${testDataDirectory.path}\" is not a directory or doesn't exist.")
         val testCases = testDataDirectory.listFiles()!!.filter { file ->
             file.isFile && file.name.endsWith(".in")
         }.map { file ->
@@ -105,12 +112,12 @@ class CCCMarker : Callable<Unit> {
             printStd("[${i + 1}/${testCases.size}] Running test case ${testCase.name}.....  ")
             when (val result = runCodeWrapped(testCase.inFile)) {
                 is RunCodeTimeout -> {
-                    printError("Time limit exceeded (${timeout}ms)")
+                    printError("Time Limit Exceeded (${timeout}ms)")
                     writeErrorFiles(testCase)
                     return
                 }
                 is RunCodeRuntimeError -> {
-                    printError("Runtime error:")
+                    printError("Runtime Error")
                     printError(result.stderr)
                     writeErrorFiles(testCase)
                     return
@@ -121,7 +128,7 @@ class CCCMarker : Callable<Unit> {
                         println("${result.time}ms")
                         times.add(result.time)
                     } else {
-                        printError("Wrong answer")
+                        printError("Wrong Answer")
                         writeErrorFiles(testCase, result.stdout)
                         return
                     }
@@ -144,11 +151,11 @@ class CCCMarker : Callable<Unit> {
     }
 
     private fun verifyResult(testCase: TestCase, output: String): Boolean {
-        if (verifyScript == null) {
+        if (verifyCommandTokens == null) {
             return testCase.expectedOutput == output
         } else {
             return runCommand(
-                verifyScript!!.absolutePath,
+                *verifyCommandTokens!!,
                 testCase.input,
                 testCase.expectedOutput,
                 output,
@@ -162,7 +169,7 @@ class CCCMarker : Callable<Unit> {
         if (source.indexOf("package") == 0) {
             val firstSemi = source.indexOf(";")
             val packageName = source.substring(7, firstSemi).trim()
-            println("Package name is $packageName.")
+            println("Package name is \"$packageName\".")
             return packageName
         } else {
             println("Package name is empty.")
