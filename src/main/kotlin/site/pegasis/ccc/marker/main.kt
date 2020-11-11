@@ -152,6 +152,7 @@ class CCCMarker : Callable<Unit> {
 
         printDivider("Accepted")
         printlnStd("Program: $program")
+        printlnStd("Test cases: ${testDataDirectory.path}")
         printlnStd("Average: ${times.average().toInt()}ms")
         printlnStd("Min: ${times.minOrNull()}ms")
         printlnStd("Max: ${times.maxOrNull()}ms")
