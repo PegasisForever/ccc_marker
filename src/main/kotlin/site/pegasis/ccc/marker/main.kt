@@ -4,12 +4,17 @@ import picocli.CommandLine
 import picocli.CommandLine.Command
 import picocli.CommandLine.Option
 import picocli.CommandLine.Parameters
-import java.io.*
+import java.io.BufferedReader
+import java.io.File
+import java.io.InputStream
+import java.io.InputStreamReader
 import java.util.concurrent.Callable
 import java.util.concurrent.TimeUnit
 
+var cleanUp: () -> Unit = {}
 fun main(args: Array<String>) {
     CommandLine(CCCMarker()).execute(*args)
+    cleanUp()
 }
 
 @Command(
@@ -35,10 +40,8 @@ class CCCMarker : Callable<Unit> {
     @Option(
         names = ["-e", "--verify"],
         description = ["The binary or script used to verify the program output, it will be called as <script> <input> <expectedOutput> <output>, a non-zero exit code indicates the program output is wrong."],
-        defaultValue = "",
-        showDefaultValue = CommandLine.Help.Visibility.NEVER
     )
-    private lateinit var verifyCommand: String
+    private var verifyScript: File? = null
 
     @Option(
         names = ["-t", "--timeout"],
@@ -46,14 +49,14 @@ class CCCMarker : Callable<Unit> {
         defaultValue = "2000",
         showDefaultValue = CommandLine.Help.Visibility.ALWAYS
     )
-    private lateinit var timeout: java.lang.Integer
+    private var timeout: Int = 2000
 
 
     override fun call() {
-        var runCodeWrapped: (input: String) -> RunCodeResult = {
+        var runCodeWrapped: (inFile: File) -> RunCodeResult = {
             throw NotImplementedError()
         }
-        var cleanUp: () -> Unit = {}
+
         if (program.endsWith(".java") && " " !in program) {
             printDivider("Compiling")
             val sourceFile = File(program).absoluteFile
@@ -66,17 +69,18 @@ class CCCMarker : Callable<Unit> {
 
             runCommand("javac", "-d", tempDir.absolutePath, sourceFile.absolutePath, assertSuccess = true)
 
-            val className = "$packageName.${program.substring(program.lastIndexOf('/') + 1, program.lastIndexOf('.'))}"
-            runCodeWrapped = { input ->
-                runCode("java", className, input = input, workingDirectory = tempDir)
+            val fullClassName =
+                "$packageName.${program.substring(program.lastIndexOf('/') + 1, program.lastIndexOf('.'))}"
+            runCodeWrapped = { inFile ->
+                runCode("java", fullClassName, inFile = inFile, workingDirectory = tempDir)
             }
             cleanUp = {
                 tempDir.deleteRecursively()
             }
         } else if (program.endsWith(".py") && " " !in program) {
             val absPath = File(program).absolutePath
-            runCodeWrapped = { input ->
-                runCode("python", absPath, input = input)
+            runCodeWrapped = { inFile ->
+                runCode("python", absPath, inFile = inFile)
             }
         }
 
@@ -93,13 +97,11 @@ class CCCMarker : Callable<Unit> {
         for (i in testCases.indices) {
             val testCase = testCases[i]
             print("[${i + 1}/${testCases.size}] Running test case ${testCase.name}.....  ")
-            val result = runCodeWrapped(testCase.input)
-            when (result) {
+            when (val result = runCodeWrapped(testCase.inFile)) {
                 is RunCodeTimeout -> {
                     println()
                     printError("Time limit exceeded (${timeout}ms)")
                     writeErrorFiles(testCase)
-                    cleanUp()
                     return
                 }
                 is RunCodeRuntimeError -> {
@@ -107,7 +109,6 @@ class CCCMarker : Callable<Unit> {
                     printError("Runtime error:")
                     printError(result.stderr)
                     writeErrorFiles(testCase)
-                    cleanUp()
                     return
                 }
                 is RunCodeFinished -> {
@@ -118,7 +119,6 @@ class CCCMarker : Callable<Unit> {
                         println()
                         printError("Wrong answer")
                         writeErrorFiles(testCase, result.stdout)
-                        cleanUp()
                         return
                     }
                 }
@@ -129,17 +129,21 @@ class CCCMarker : Callable<Unit> {
         println("Average: ${times.average().toInt()}ms")
         println("Min: ${times.minOrNull()}ms")
         println("Max: ${times.maxOrNull()}ms")
-        cleanUp()
     }
 
     private fun verifyResult(testCase: TestCase, output: String): Boolean {
-        if (verifyCommand == "") {
+        if (verifyScript == null) {
             return testCase.expectedOutput == output
         } else {
-            return runCommand(verifyCommand, testCase.input, testCase.expectedOutput, output) == 0
+            return runCommand(
+                verifyScript!!.absolutePath,
+                testCase.input,
+                testCase.expectedOutput,
+                output,
+                print = false
+            ) == 0
         }
     }
-
 
     private fun javaPackageName(sourceFile: File): String {
         val source = sourceFile.readText()
@@ -153,53 +157,50 @@ class CCCMarker : Callable<Unit> {
     private fun runCommand(vararg args: String, print: Boolean = true, assertSuccess: Boolean = false): Int {
         if (print) println("shell$ ${args.joinToString(" ")}")
         val process = startProcess(*args)
+        val stdout = process.inputStream.stringBuilder
+        val stderr = process.errorStream.stringBuilder
 
-        BufferedReader(InputStreamReader(process.inputStream)).run {
-            val stdout = readText().trim()
-            if (stdout.isNotBlank()) println(stdout)
-            close()
-        }
-        BufferedReader(InputStreamReader(process.errorStream)).run {
-            val stderr = readText().trim()
-            if (stderr.isNotBlank()) printError(stderr)
-            close()
-        }
         val status = process.waitFor()
+        if (stdout.isNotBlank() && print) println(stdout)
+        if (stderr.isNotBlank()) printError(stderr)
         if (print) println("       Process finished with exit code $status")
         if (assertSuccess) assert(status == 0)
         return status
     }
 
-    private fun runCode(vararg args: String, input: String, workingDirectory: File? = null): RunCodeResult {
-        val process = startProcess(*args, workingDirectory = workingDirectory)
+    private fun runCode(vararg args: String, inFile: File, workingDirectory: File? = null): RunCodeResult {
+        val process = startProcess(*args, inFile = inFile, workingDirectory = workingDirectory)
         val start = System.currentTimeMillis()
-        BufferedWriter(OutputStreamWriter(process.outputStream)).run {
-            write(input)
-            close()
-        }
+        val stdout = process.inputStream.stringBuilder
+        val stderr = process.errorStream.stringBuilder
 
-        val timeouted = !process.waitFor((timeout as Int).toLong(), TimeUnit.MILLISECONDS)
+        val timeouted = !process.waitFor(timeout.toLong(), TimeUnit.MILLISECONDS)
 
         if (timeouted) {
             process.destroyForcibly()
-            return RunCodeTimeout()
+            return RunCodeTimeout
         } else if (process.exitValue() != 0) {
-            val reader = BufferedReader(InputStreamReader(process.errorStream))
-            val stderr = reader.readText()
-            reader.close()
-            return RunCodeRuntimeError(stderr.toLF())
+            return RunCodeRuntimeError(stderr.toString().toLF())
         } else {
             val time = System.currentTimeMillis() - start
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val stdout = reader.readText()
-            reader.close()
-            return RunCodeFinished(time.toInt(), stdout.toLF())
+            return RunCodeFinished(time.toInt(), stdout.toString().toLF())
         }
     }
 
-    private fun startProcess(vararg args: String, workingDirectory: File? = null): Process {
+    private val InputStream.stringBuilder: StringBuilder
+        get() {
+            val sb = StringBuilder()
+            BufferedReader(InputStreamReader(this)).forEachLine { line ->
+                sb.append(line)
+                sb.append('\n')
+            }
+            return sb
+        }
+
+    private fun startProcess(vararg args: String, inFile: File? = null, workingDirectory: File? = null): Process {
         val processBuilder = ProcessBuilder()
         processBuilder.command(*args)
+        if (inFile != null) processBuilder.redirectInput(inFile)
         if (workingDirectory != null) processBuilder.directory(workingDirectory)
         return processBuilder.start()
     }
@@ -212,8 +213,8 @@ class CCCMarker : Callable<Unit> {
         println()
     }
 
-    private fun printError(text: String){
-        System.err.println("\u001B[31m$text\u001B[0m")
+    private fun printError(message: Any?) {
+        System.err.println("\u001B[31m$message\u001B[0m")
     }
 
     private fun writeErrorFiles(testCase: TestCase, output: String? = null) {
@@ -232,7 +233,7 @@ sealed class RunCodeResult
 
 data class RunCodeFinished(val time: Int, val stdout: String) : RunCodeResult()
 data class RunCodeRuntimeError(val stderr: String) : RunCodeResult()
-class RunCodeTimeout : RunCodeResult()
+object RunCodeTimeout : RunCodeResult()
 
 data class TestCase(val inFile: File, val outFile: File) : Comparable<TestCase> {
     val name: String
