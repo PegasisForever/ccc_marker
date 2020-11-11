@@ -52,12 +52,12 @@ class CCCMarker : Callable<Unit> {
             throw NotImplementedError()
         }
         if (program.endsWith(".java") && " " !in program) {
+            printDivider("Compiling")
             val sourceFile = File(program).absoluteFile
-            assert(sourceFile.exists())
             assert(sourceFile.isFile)
 
             println("Compiling $program.....")
-            val tempDir = File(".ccc-marker-temp-${System.currentTimeMillis()}")
+            val tempDir = File(".ccc-marker-temp-${System.currentTimeMillis()}").absoluteFile
             tempDir.mkdir()
             val packageName = javaPackageName(sourceFile)
 
@@ -69,24 +69,49 @@ class CCCMarker : Callable<Unit> {
             }
         }
 
-        val result = runCodeWrapped(
-            """
-            4 5
-            WWWWW
-            W.W.W
-            WWS.W
-            WWWWW
-        """.trimIndent()
-        )
-        println(result)
+        printDivider("Testing")
+        assert(testDataDirectory.isDirectory)
+
+        val testCases = testDataDirectory.listFiles()!!.filter { file ->
+            file.isFile && file.name.endsWith(".in")
+        }.map { file ->
+            TestCase(file, File(file.path.substring(0, file.path.length - 3) + ".out"))
+        }.sorted()
+        val times = arrayListOf<Int>()
+
+        for (i in testCases.indices) {
+            val testCase = testCases[i]
+            print("[${i + 1}/${testCases.size}] Running test case ${testCase.name}.....  ")
+            val result = runCodeWrapped(testCase.input)
+            if (result is RunCodeTimeout) {
+                println()
+                System.err.println("Time limit exceeded (${timeout}ms)")
+                // todo write in and out to file
+                return
+            } else if (result is RunCodeRuntimeError) {
+                println()
+                System.err.println("Runtime error:")
+                System.err.println(result.stderr)
+                return
+                // todo write in and out to file
+            } else if (result is RunCodeFinished) {
+                println("${result.time}ms")
+                times.add(result.time)
+            } else {
+                error("wtf")
+                // todo use sealed class
+            }
+        }
+
+        printDivider("Accepted")
+        println("Average: ${times.average().toInt()}ms")
+        println("Min: ${times.minOrNull()}ms")
+        println("Max: ${times.maxOrNull()}ms")
     }
 
 
     private fun javaPackageName(sourceFile: File): String {
-        val stream = sourceFile.inputStream()
-        val source = stream.readBytes().toString(Charsets.UTF_8)
-        stream.close()
-
+        val source = sourceFile.readText()
         val firstSemi = source.indexOf(";")
         assert(firstSemi >= 0)
         val packageName = source.substring(7, firstSemi).trim()
@@ -129,13 +154,13 @@ class CCCMarker : Callable<Unit> {
             val reader = BufferedReader(InputStreamReader(process.errorStream))
             val stderr = reader.readText()
             reader.close()
-            return RunCodeRuntimeError(stderr)
+            return RunCodeRuntimeError(stderr.toLF())
         } else {
             val time = System.currentTimeMillis() - start
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val stdout = reader.readText()
             reader.close()
-            return RunCodeFinished(time.toInt(), stdout)
+            return RunCodeFinished(time.toInt(), stdout.toLF())
         }
     }
 
@@ -145,6 +170,14 @@ class CCCMarker : Callable<Unit> {
         if (workingDirectory != null) processBuilder.directory(workingDirectory)
         return processBuilder.start()
     }
+
+    private fun printDivider(text: String) {
+        println()
+        print("====")
+        print(" $text ")
+        println("=".repeat(94 - text.length))
+        println()
+    }
 }
 
 interface RunCodeResult
@@ -152,3 +185,30 @@ interface RunCodeResult
 data class RunCodeFinished(val time: Int, val stdout: String) : RunCodeResult
 data class RunCodeRuntimeError(val stderr: String) : RunCodeResult
 class RunCodeTimeout : RunCodeResult
+
+data class TestCase(val inFile: File, val outFile: File) : Comparable<TestCase> {
+    val name: String
+        get() = inFile.nameWithoutExtension
+    val isSample: Boolean
+        get() = "sample" in inFile.name
+    val input: String
+        get() = inFile.readText().toLF()
+    val expectedOutput: String
+        get() = outFile.readText().toLF()
+
+    override fun compareTo(other: TestCase): Int {
+        return if (isSample && !other.isSample) {
+            -1
+        } else if (!isSample && other.isSample) {
+            1
+        } else {
+            name.compareTo(other.name)
+        }
+    }
+}
+
+fun String.toLF(): String {
+    return replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .trim()
+}
