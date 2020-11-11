@@ -35,7 +35,7 @@ class CCCMarker : Callable<Unit> {
     @Parameters(
         arity = "1",
         index = "1",
-        description = ["Either the command to run the program or the source code file (supports .py and .java)."]
+        description = ["Either the command to run the program or the source code file (supports .py, .cpp and .java)."]
     )
     private lateinit var program: String
 
@@ -64,8 +64,7 @@ class CCCMarker : Callable<Unit> {
             expect(sourceFile.isFile, "\"$program\" is not a file or doesn't exist.")
 
             printlnStd("Compiling $program.....")
-            val tempDir = File(".ccc_marker_temp_${System.currentTimeMillis()}").absoluteFile
-            tempDir.mkdir()
+            val tempDir = createTempDir()
 
             runCommand("javac", "-d", tempDir.absolutePath, sourceFile.absolutePath, assertSuccess = true)
 
@@ -80,8 +79,19 @@ class CCCMarker : Callable<Unit> {
             runCodeWrapped = { inFile ->
                 runCode("java", fullClassName, inFile = inFile, workingDirectory = tempDir)
             }
-            cleanUp = {
-                tempDir.deleteRecursively()
+        } else if (program.endsWith(".cpp") && " " !in program) {
+            printDivider("Compiling")
+            val sourceFile = File(program).absoluteFile
+            expect(sourceFile.isFile, "\"$program\" is not a file or doesn't exist.")
+
+            printlnStd("Compiling $program.....")
+            val tempDir = createTempDir()
+
+            val exePath = tempDir.absolutePath + "${File.separatorChar}temp"
+            runCommand("g++", sourceFile.absolutePath, "-o", exePath, assertSuccess = true)
+
+            runCodeWrapped = { inFile ->
+                runCode(exePath, inFile = inFile, workingDirectory = tempDir)
             }
         } else if (program.endsWith(".py") && " " !in program) {
             val absPath = File(program).absolutePath
@@ -141,6 +151,7 @@ class CCCMarker : Callable<Unit> {
         }
 
         printDivider("Accepted")
+        printlnStd("Program: $program")
         printlnStd("Average: ${times.average().toInt()}ms")
         printlnStd("Min: ${times.minOrNull()}ms")
         printlnStd("Max: ${times.maxOrNull()}ms")
@@ -152,6 +163,15 @@ class CCCMarker : Callable<Unit> {
         } catch (e: Throwable) {
             printError(e.stackTraceToString())
         }
+    }
+
+    private fun createTempDir(): File {
+        val tempDir = File(".ccc_marker_temp_${System.currentTimeMillis()}").absoluteFile
+        tempDir.mkdir()
+        cleanUp = {
+            tempDir.deleteRecursively()
+        }
+        return tempDir
     }
 
     private fun verifyResult(testCase: TestCase, output: String): Boolean {
