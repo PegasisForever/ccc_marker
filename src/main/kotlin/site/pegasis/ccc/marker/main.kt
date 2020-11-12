@@ -287,7 +287,7 @@ data class TestCase(val inFile: File, val outFile: File) : Comparable<TestCase> 
     val name: String
         get() = inFile.nameWithoutExtension
     val isSample: Boolean
-        get() = "sample" in inFile.name
+        get() = "sam" in inFile.name
     val input: String
         get() = inFile.readText().toLF()
     val expectedOutput: String
@@ -299,7 +299,13 @@ data class TestCase(val inFile: File, val outFile: File) : Comparable<TestCase> 
         } else if (!isSample && other.isSample) {
             1
         } else {
-            name.compareTo(other.name)
+            val numbers = name.split(".").mapNotNull { it.toIntOrNull() }
+            val otherNumbers = other.name.split(".").mapNotNull { it.toIntOrNull() }
+            if (numbers.size != otherNumbers.size || numbers.isEmpty()) {
+                name.compareTo(other.name)
+            } else {
+                numbers.first() - otherNumbers.first()
+            }
         }
     }
 }
