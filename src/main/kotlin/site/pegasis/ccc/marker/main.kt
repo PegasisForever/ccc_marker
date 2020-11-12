@@ -10,6 +10,7 @@ import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.concurrent.Callable
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 val isWindows = "win" in System.getProperty("os.name").toLowerCase()
 var cleanUp: () -> Unit = {}
@@ -205,8 +206,8 @@ class CCCMarker : Callable<Unit> {
     private fun runCommand(vararg args: String, print: Boolean = true, assertSuccess: Boolean = false): Int {
         if (print) println("shell$ ${args.joinToString(" ")}")
         val process = startProcess(*args)
-        val stdout = process.inputStream.stringBuilder
-        val stderr = process.errorStream.stringBuilder
+        val stdout = process.inputStream.stringBuffer
+        val stderr = process.errorStream.stringBuffer
 
         val status = process.waitFor()
         if (stdout.isNotBlank() && print) println(stdout)
@@ -219,8 +220,8 @@ class CCCMarker : Callable<Unit> {
     private fun runCode(vararg args: String, inFile: File, workingDirectory: File? = null): RunCodeResult {
         val process = startProcess(*args, inFile = inFile, workingDirectory = workingDirectory)
         val start = System.currentTimeMillis()
-        val stdout = process.inputStream.stringBuilder
-        val stderr = process.errorStream.stringBuilder
+        val stdout = process.inputStream.stringBuffer
+        val stderr = process.errorStream.stringBuffer
 
         val timeouted = !process.waitFor(timeout.toLong(), TimeUnit.MILLISECONDS)
 
@@ -235,12 +236,14 @@ class CCCMarker : Callable<Unit> {
         }
     }
 
-    private val InputStream.stringBuilder: StringBuilder
+    private val InputStream.stringBuffer: StringBuffer
         get() {
-            val sb = StringBuilder()
-            BufferedReader(InputStreamReader(this)).forEachLine { line ->
-                sb.append(line)
-                sb.append('\n')
+            val sb = StringBuffer()
+            thread(start = true) {
+                BufferedReader(InputStreamReader(this)).forEachLine { line ->
+                    sb.append(line)
+                    sb.append('\n')
+                }
             }
             return sb
         }
