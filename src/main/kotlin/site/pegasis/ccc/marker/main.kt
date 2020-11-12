@@ -23,7 +23,7 @@ fun main(args: Array<String>) {
 @Command(
     name = "ccc-marker",
     mixinStandardHelpOptions = true,
-    version = ["1.0"]
+    version = ["1.1"]
 )
 class CCCMarker : Callable<Unit> {
     @Parameters(
